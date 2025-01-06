@@ -3,11 +3,12 @@
 import React, { useEffect, useState, useRef } from 'react';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
-import Draggable, { DraggableEvent, DraggableData } from 'react-draggable';
+import Draggable from 'react-draggable';
 import { v4 as uuidv4 } from 'uuid';
 import { create } from 'zustand';
 import { Share2, Square, Circle, StickyNote, Type } from 'lucide-react';
 
+// Types
 interface Shape {
   id: string;
   type: 'square' | 'circle' | 'sticky' | 'text';
@@ -16,88 +17,91 @@ interface Shape {
   content?: string;
 }
 
+// Store
 interface BoardStore {
   shapes: Shape[];
   setShapes: (shapes: Shape[]) => void;
+  addShape: (shape: Shape) => void;
+  updateShape: (id: string, updates: Partial<Shape>) => void;
 }
 
 const useStore = create<BoardStore>((set) => ({
   shapes: [],
   setShapes: (shapes) => set({ shapes }),
+  addShape: (shape) => set((state) => ({ shapes: [...state.shapes, shape] })),
+  updateShape: (id, updates) =>
+    set((state) => ({
+      shapes: state.shapes.map((shape) =>
+        shape.id === id ? { ...shape, ...updates } : shape
+      ),
+    })),
 }));
 
-interface ShapeComponentProps {
+const ShapeComponent = React.forwardRef<HTMLDivElement, {
   shape: Shape;
-  onDragStop: (e: DraggableEvent, data: DraggableData) => void;
+  onDragStop: (e: any, data: { x: number; y: number }) => void;
   onDoubleClick: () => void;
-}
-
-const ShapeComponent = React.forwardRef<HTMLDivElement, ShapeComponentProps>(
-  ({ shape, onDragStop, onDoubleClick }, ref) => {
-    let content;
-    switch (shape.type) {
-      case 'square':
-        content = <div className="w-32 h-32 bg-blue-500 rounded-lg" />;
-        break;
-      case 'circle':
-        content = <div className="w-32 h-32 bg-green-500 rounded-full" />;
-        break;
-      case 'sticky':
-        content = (
-          <div className="w-48 h-48 bg-yellow-200 p-4 shadow-lg rounded-lg">
-            {shape.content}
-          </div>
-        );
-        break;
-      case 'text':
-        content = (
-          <div className="min-w-48 min-h-12 px-4 py-2 bg-white border border-gray-200 rounded">
-            {shape.content}
-          </div>
-        );
-        break;
-    }
-
-    return (
-      <Draggable
-        nodeRef={ref}
-        position={{ x: shape.x, y: shape.y }}
-        onStop={onDragStop}
-      >
-        <div
-          ref={ref}
-          className="absolute cursor-move"
-          onDoubleClick={onDoubleClick}
-        >
-          {content}
+}>(({ shape, onDragStop, onDoubleClick }, ref) => {
+  let content;
+  switch (shape.type) {
+    case 'square':
+      content = <div className="w-32 h-32 bg-blue-500 rounded-lg" />;
+      break;
+    case 'circle':
+      content = <div className="w-32 h-32 bg-green-500 rounded-full" />;
+      break;
+    case 'sticky':
+      content = (
+        <div className="w-48 h-48 bg-yellow-200 p-4 shadow-lg rounded-lg">
+          {shape.content}
         </div>
-      </Draggable>
-    );
+      );
+      break;
+    case 'text':
+      content = (
+        <div className="min-w-48 min-h-12 px-4 py-2 bg-white border border-gray-200 rounded">
+          {shape.content}
+        </div>
+      );
+      break;
   }
-);
+
+  return (
+    <Draggable
+      nodeRef={ref}
+      position={{ x: shape.x, y: shape.y }}
+      onStop={onDragStop}
+    >
+      <div
+        ref={ref}
+        className="absolute cursor-move"
+        onDoubleClick={onDoubleClick}
+      >
+        {content}
+      </div>
+    </Draggable>
+  );
+});
 
 ShapeComponent.displayName = 'ShapeComponent';
 
-interface WebSocketStatus {
-  status: string;
-}
-
-export default function CollaborativeBoard(): JSX.Element {
-  const { shapes, setShapes } = useStore();
+export default function CollaborativeBoard() {
+  const { shapes, setShapes, addShape, updateShape } = useStore();
   const [doc] = useState(() => new Y.Doc());
   const [copied, setCopied] = useState(false);
   const shapeRefs = useRef<{ [key: string]: React.RefObject<HTMLDivElement> }>({});
   const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
+    const wsHost = window.location.hostname;
     const wsProvider = new WebsocketProvider(
-      `wss://${process.env.NEXT_PUBLIC_WS_SERVER}`,
+      `wss://${process.env.NEXT_PUBLIC_WS_SERVER}`,  // Render.com URL
       'collab-board',
       doc,
       { connect: true }
     );
 
-    wsProvider.on('status', (event: WebSocketStatus) => {
+    wsProvider.on('status', (event: { status: string }) => {
       console.log('WebSocket status:', event.status);
       setIsConnected(event.status === 'connected');
     });
@@ -108,7 +112,7 @@ export default function CollaborativeBoard(): JSX.Element {
 
     const yShapes = doc.getArray('shapes');
 
-    const handleSync = (): void => {
+    const handleSync = () => {
       const shapeArray = yShapes.toArray() as Shape[];
       setShapes(shapeArray);
     };
@@ -121,7 +125,7 @@ export default function CollaborativeBoard(): JSX.Element {
     };
   }, [doc, setShapes]);
 
-  const createShape = (type: Shape['type']): void => {
+  const createShape = (type: Shape['type']) => {
     const newShape: Shape = {
       id: uuidv4(),
       type,
@@ -135,7 +139,7 @@ export default function CollaborativeBoard(): JSX.Element {
     shapeRefs.current[newShape.id] = React.createRef();
   };
 
-  const handleDrag = (id: string, _event: DraggableEvent, data: DraggableData): void => {
+  const handleDrag = (id: string, _: any, data: { x: number; y: number }) => {
     const yShapes = doc.getArray('shapes');
     const index = shapes.findIndex((shape) => shape.id === id);
 
@@ -149,7 +153,7 @@ export default function CollaborativeBoard(): JSX.Element {
     }
   };
 
-  const handleDoubleClick = (id: string): void => {
+  const handleDoubleClick = (id: string) => {
     const shape = shapes.find((s) => s.id === id);
     if (shape && (shape.type === 'sticky' || shape.type === 'text')) {
       const newContent = prompt('Enter new content:', shape.content);
@@ -167,16 +171,19 @@ export default function CollaborativeBoard(): JSX.Element {
     }
   };
 
-  const shareBoard = async (): Promise<void> => {
+  const shareBoard = async () => {
     try {
-      const url = window.location.origin;
+      const wsHost = window.location.hostname;
+      const url = `http://${wsHost}:3000`;
       await navigator.clipboard.writeText(url);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       console.error('Failed to copy:', err);
+      // Fallback for browsers that don't support clipboard API
       const textArea = document.createElement('textarea');
-      textArea.value = window.location.origin;
+      const wsHost = window.location.hostname;
+      textArea.value = `http://${wsHost}:3000`;
       document.body.appendChild(textArea);
       textArea.select();
       try {
@@ -192,12 +199,14 @@ export default function CollaborativeBoard(): JSX.Element {
 
   return (
     <div className="w-screen h-screen bg-gray-50 overflow-hidden relative">
+      {/* Connection Status */}
       {!isConnected && (
         <div className="fixed top-2 left-1/2 transform -translate-x-1/2 bg-red-500 text-white px-4 py-2 rounded-lg z-50">
           Connecting to server...
         </div>
       )}
 
+      {/* Toolbar */}
       <div className="fixed top-4 left-4 flex flex-col gap-4 bg-white p-2 rounded-lg shadow-lg z-50">
         <button
           onClick={() => createShape('square')}
@@ -229,6 +238,7 @@ export default function CollaborativeBoard(): JSX.Element {
         </button>
       </div>
 
+      {/* Share Button */}
       <button
         onClick={shareBoard}
         className="fixed top-4 right-4 bg-blue-500 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-600 transition-colors z-50"
@@ -237,6 +247,7 @@ export default function CollaborativeBoard(): JSX.Element {
         {copied ? 'Copied!' : 'Share'}
       </button>
 
+      {/* Canvas */}
       <div className="w-full h-full">
         {shapes.map((shape) => {
           if (!shapeRefs.current[shape.id]) {
